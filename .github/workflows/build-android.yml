@@ -1,0 +1,93 @@
+name: Build Android (Release APK & AAB)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Signed APK & AAB
+    runs-on: ubuntu-latest
+
+    env:
+      # Password bawaan untuk keystore persisten SiPemo.
+      # Bisa di-override melalui GitHub Secrets jika diinginkan.
+      STORE_PASSWORD: ${{ secrets.STORE_PASSWORD || 'SipemoSekolahRakyat2026!' }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'SipemoSekolahRakyat2026!' }}
+      KEY_ALIAS: "upload"
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Setup Persistent Keystore
+        id: setup_keystore
+        run: |
+          echo "Memeriksa ketersediaan Keystore Persisten..."
+          
+          # 1. Jika ada Secret KEYSTORE_BASE64 di GitHub Secrets, gunakan itu:
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "Menggunakan Keystore dari GitHub Secrets (KEYSTORE_BASE64)..."
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > my-upload-key.jks
+          # 2. Jika file my-upload-key.jks sudah ada di repository:
+          elif [ -f "my-upload-key.jks" ]; then
+            echo "Menggunakan Keystore yang ada di repository (my-upload-key.jks)..."
+          # 3. Jika belum ada, buat keystore permanen (hanya sekali) dan jangan pernah ubah:
+          else
+            echo "Membuat Keystore Permanen baru (30 tahun masa berlaku)..."
+            keytool -genkeypair -v \
+              -keystore my-upload-key.jks \
+              -alias upload \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass "$STORE_PASSWORD" \
+              -keypass "$KEY_PASSWORD" \
+              -dname "CN=SiPemo Sekolah Rakyat, OU=IT Operasional, O=Sekolah Rakyat Indonesia, C=ID"
+          fi
+          
+          echo "KEYSTORE_PATH=$(pwd)/my-upload-key.jks" >> $GITHUB_ENV
+          echo "Keystore berhasil disiapkan dan terverifikasi."
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build Release APK
+        env:
+          KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
+          STORE_PASSWORD: ${{ env.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ env.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Build Release AAB (Android App Bundle)
+        env:
+          KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
+          STORE_PASSWORD: ${{ env.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ env.KEY_PASSWORD }}
+        run: ./gradlew bundleRelease --no-daemon
+
+      - name: Upload Release APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SiPemo-Release-APK
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 30
+
+      - name: Upload Release AAB Artifact (Google Play)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SiPemo-Release-AAB
+          path: app/build/outputs/bundle/release/*.aab
+          retention-days: 30

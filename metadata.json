@@ -1,0 +1,6 @@
+{
+  "name": "SiPemo Sekolah Rakyat",
+  "description": "Sistem Peminjaman Mobil Operasional Sekolah Rakyat Indonesia dengan Real-Time Tracking, Foreground Service, Multi-Point Route, dan Role-Based Access Control.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
