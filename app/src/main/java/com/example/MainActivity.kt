@@ -176,7 +176,9 @@ fun MainAppContainer(repository: DataRepository) {
                             Text(
                                 text = currentUser.schoolBranchName ?: "Pusat Nasional",
                                 fontSize = 11.sp,
-                                color = Color(0xFFCBD5E1)
+                                color = Color(0xFFCBD5E1),
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
                         }
                     },

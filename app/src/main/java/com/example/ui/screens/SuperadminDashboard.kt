@@ -85,7 +85,7 @@ fun SuperadminDashboard(
     val auditLogs by repository.auditLogs.collectAsState()
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Ringkasan Nasional", "Antrean SK Sekolah", "Cabang Resmi", "Audit Log")
+    val tabs = listOf("Ringkasan", "Antrean SK", "Cabang Resmi", "Audit Log")
 
     val pendingSchools = schools.filter { !it.isApprovedBySuperadmin }
     val approvedSchools = schools.filter { it.isApprovedBySuperadmin }
@@ -110,10 +110,14 @@ fun SuperadminDashboard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp)
+                    ) {
                         Text(
                             text = "Dashboard Superadmin Nasional",
-                            fontSize = 18.sp,
+                            fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
@@ -125,14 +129,15 @@ fun SuperadminDashboard(
                     }
                     Surface(
                         color = EmeraldGreen,
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
                             text = "PUSAT",
-                            fontSize = 10.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            maxLines = 1,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                         )
                     }
                 }
@@ -506,13 +511,21 @@ private fun ApprovedBranchesListContent(
                             text = branch.name,
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp,
-                            color = NavyPrimary
+                            color = NavyPrimary,
+                            lineHeight = 18.sp
                         )
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Admin: ${branch.adminName} • Armada: ${branchFleet.size} Unit",
+                            text = "Admin: ${branch.adminName}",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Text(
+                            text = "Armada: ${branchFleet.size} Unit",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = if (branch.isActive) "Status: Cabang Aktif" else "Status: Nonaktif",
                             fontSize = 11.sp,
@@ -520,6 +533,7 @@ private fun ApprovedBranchesListContent(
                             color = if (branch.isActive) EmeraldGreen else CrimsonRed
                         )
                     }
+                    Spacer(modifier = Modifier.width(10.dp))
                     Switch(
                         checked = branch.isActive,
                         onCheckedChange = { onToggleStatus(branch) },
