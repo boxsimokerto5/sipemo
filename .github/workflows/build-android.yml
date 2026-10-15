@@ -75,15 +75,17 @@ jobs:
       - name: Build Release APK
         env:
           KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
-          STORE_PASSWORD: ${{ env.STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ env.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD != '' && secrets.STORE_PASSWORD || 'SipemoSekolahRakyat2026!' }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD != '' && secrets.KEY_PASSWORD || 'SipemoSekolahRakyat2026!' }}
+          KEY_ALIAS: "upload"
         run: ./gradlew assembleRelease --no-daemon
 
       - name: Build Release AAB (Android App Bundle)
         env:
           KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
-          STORE_PASSWORD: ${{ env.STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ env.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD != '' && secrets.STORE_PASSWORD || 'SipemoSekolahRakyat2026!' }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD != '' && secrets.KEY_PASSWORD || 'SipemoSekolahRakyat2026!' }}
+          KEY_ALIAS: "upload"
         run: ./gradlew bundleRelease --no-daemon
 
       - name: Upload Release APK Artifact
