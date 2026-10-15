@@ -56,4 +56,12 @@ class ExampleRobolectricTest {
         val approved = repository.schools.value.find { it.id == pendingSchool.id }!!
         assertTrue(approved.isApprovedBySuperadmin)
     }
+
+    @Test
+    fun `test qr code generation produces valid bitmap`() {
+        val bitmap = com.example.util.QrCodeUtils.generateQrBitmap("SR-JKT-8821", 256)
+        org.junit.Assert.assertNotNull(bitmap)
+        assertEquals(256, bitmap?.width)
+        assertEquals(256, bitmap?.height)
+    }
 }

@@ -182,7 +182,10 @@ fun StaffDashboard(
                 }
             )
             2 -> StaffLiveTrackingContent(
-                activeBooking = myBookings.find { it.status == BookingStatus.ON_DUTY },
+                currentUser = currentUser,
+                myActiveBooking = myBookings.find { it.status == BookingStatus.ON_DUTY },
+                branchActiveBooking = bookings.filter { it.schoolBranchId == branchId }.find { it.status == BookingStatus.ON_DUTY },
+                branchVehicles = branchVehicles,
                 trackingState = trackingState
             )
         }
@@ -562,21 +565,30 @@ private fun MyBookingsListContent(
 
 @Composable
 private fun StaffLiveTrackingContent(
-    activeBooking: BookingRequest?,
+    currentUser: AppUser,
+    myActiveBooking: BookingRequest?,
+    branchActiveBooking: BookingRequest?,
+    branchVehicles: List<CarVehicle>,
     trackingState: com.example.service.LiveTrackingState
 ) {
-    if (activeBooking == null) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.LocationOn, contentDescription = null, tint = Color(0xFFCBD5E1), modifier = Modifier.size(54.dp))
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("Tidak ada peminjaman aktif yang sedang On Duty saat ini.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+    val context = LocalContext.current
+    val targetBooking = myActiveBooking ?: branchActiveBooking
+    val isMyDuty = myActiveBooking != null
+
+    val displayWaypoints = remember(targetBooking) {
+        if (targetBooking != null && targetBooking.waypoints.isNotEmpty()) {
+            targetBooking.waypoints
+        } else {
+            listOf(
+                RouteWaypoint("WP-BASE", "Sekolah Rakyat Cabang", "Pangkalan Utama Armada", -6.2088, 106.8456, isCompleted = true),
+                RouteWaypoint("WP-T1", "RSUD / Puskesmas Rujukan", "Jl. Raden Inten II No. 1", -6.2200, 106.8560),
+                RouteWaypoint("WP-T2", "Kantor Suku Dinas Pendidikan", "Jl. Matraman Raya No. 220", -6.2300, 106.8650)
+            )
         }
-        return
+    }
+
+    val displayVehiclePlate = remember(targetBooking, branchVehicles) {
+        targetBooking?.vehiclePlate ?: branchVehicles.firstOrNull()?.plateNumber ?: "B 1024 SR"
     }
 
     Column(
@@ -584,28 +596,124 @@ private fun StaffLiveTrackingContent(
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        Text(
-            text = "Pelacakan Perjalanan Dinas Aktif",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            color = NavyPrimary
-        )
-        Text(
-            text = "Foreground Service Android menjaga pelacakan tetap berjalan di latar belakang",
-            fontSize = 11.sp,
-            color = EmeraldGreen
-        )
+        // Status & Context Banner Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = SurfacePureWhite),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BorderLight)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        color = if (targetBooking != null || trackingState.isTrackingActive) EmeraldGreen.copy(alpha = 0.15f) else Color(0xFF64748B).copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = when {
+                                isMyDuty -> "PERJALANAN DINAS ANDA (ON DUTY)"
+                                targetBooking != null -> "ARMADA CABANG BERTUGAS"
+                                trackingState.isTrackingActive -> "SIMULASI GPS AKTIF"
+                                else -> "ARMADA STANDBY DI PANGKALAN"
+                            },
+                            color = if (targetBooking != null || trackingState.isTrackingActive) EmeraldGreen else Color(0xFF64748B),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+
+                    Text(
+                        text = targetBooking?.bookingCode ?: "PANGKALAN CABANG",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = NavyPrimary
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (targetBooking != null) {
+                    Text(
+                        text = targetBooking.purpose,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = NavyPrimary
+                    )
+                    Text(
+                        text = "Unit: ${targetBooking.vehicleModel} (${targetBooking.vehiclePlate}) • Peminjam: ${targetBooking.requesterName}",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Text(
+                        text = "Pantauan Rute & Pangkalan Armada Sekolah Rakyat",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = NavyPrimary
+                    )
+                    Text(
+                        text = "Belum ada dinas yang sedang keluar gerbang. Peta interaktif menampilkan pangkalan dan koridor rute aman.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Demo / Simulation Control Button
+                    if (trackingState.isTrackingActive) {
+                        OutlinedButton(
+                            onClick = {
+                                TrackingForegroundService.stopTracking(context)
+                                Toast.makeText(context, "Pelacakan GPS dihentikan", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("btn_stop_tracking_sim"),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = CrimsonRed)
+                        ) {
+                            Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Hentikan Simulasi GPS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                TrackingForegroundService.startTracking(
+                                    context = context,
+                                    bookingCode = "SR-JKT-8821",
+                                    vehiclePlate = displayVehiclePlate,
+                                    driverName = currentUser.name
+                                )
+                                Toast.makeText(context, "Simulasi Live Tracking dimulai! Sinyal GPS aktif.", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("btn_start_tracking_sim"),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
+                        ) {
+                            Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Mulai Simulasi Pelacakan GPS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(12.dp))
 
+        // Interactive Map View is ALWAYS RENDERED
         InteractiveMapView(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            waypoints = activeBooking.waypoints,
-            vehiclePlate = activeBooking.vehiclePlate,
-            isTrackingActive = trackingState.isTrackingActive,
-            speedKmh = trackingState.speedKmh,
+            waypoints = displayWaypoints,
+            vehiclePlate = displayVehiclePlate,
+            isTrackingActive = trackingState.isTrackingActive || targetBooking != null,
+            speedKmh = if (trackingState.isTrackingActive) trackingState.speedKmh else (if (targetBooking != null) 38f else 0f),
             geofenceAlert = trackingState.geofenceAlert
         )
     }

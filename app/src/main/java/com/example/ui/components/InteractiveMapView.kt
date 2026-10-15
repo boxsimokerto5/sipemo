@@ -83,10 +83,60 @@ import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 
+private const val CARTO_VOYAGER_STYLE_JSON = """{
+  "version": 8,
+  "name": "CartoVoyager",
+  "sources": {
+    "carto-voyager": {
+      "type": "raster",
+      "tiles": [
+        "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png",
+        "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png",
+        "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png"
+      ],
+      "tileSize": 256,
+      "attribution": "CARTO / OpenStreetMap"
+    }
+  },
+  "layers": [
+    {
+      "id": "carto-voyager-layer",
+      "type": "raster",
+      "source": "carto-voyager",
+      "minzoom": 0,
+      "maxzoom": 20
+    }
+  ]
+}"""
+
+private const val ESRI_SATELLITE_STYLE_JSON = """{
+  "version": 8,
+  "name": "EsriSatellite",
+  "sources": {
+    "esri-satellite": {
+      "type": "raster",
+      "tiles": [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+      ],
+      "tileSize": 256,
+      "attribution": "Esri World Imagery"
+    }
+  },
+  "layers": [
+    {
+      "id": "esri-satellite-layer",
+      "type": "raster",
+      "source": "esri-satellite",
+      "minzoom": 0,
+      "maxzoom": 19
+    }
+  ]
+}"""
+
 enum class MapLayerMode(val label: String) {
-    STREETS("Jalan (MapTiler)"),
-    SATELLITE("Satelit (MapTiler)"),
-    SCHEMATIC("Skematik")
+    STREETS("Jalan"),
+    SATELLITE("Satelit"),
+    SCHEMATIC("Radar Skematik")
 }
 
 @Composable
@@ -102,22 +152,14 @@ fun InteractiveMapView(
     var selectedLayer by remember { mutableStateOf(MapLayerMode.STREETS) }
     var maplibreMapInstance by remember { mutableStateOf<MapLibreMap?>(null) }
 
-    // MapTiler API Key from BuildConfig with fallback to user's registered key
+    // MapTiler API Key from BuildConfig with fallback
     val maptilerKey = remember {
         val key = try {
             BuildConfig.MAPTILER_API_KEY
         } catch (_: Exception) {
             ""
         }
-        if (key.isNotBlank() && key != "your_maptiler_api_key_here") key else "LjxVm093WVywabUyIMw1"
-    }
-
-    val styleUrl = remember(selectedLayer, maptilerKey) {
-        when (selectedLayer) {
-            MapLayerMode.STREETS -> "https://api.maptiler.com/maps/streets-v2/style.json?key=$maptilerKey"
-            MapLayerMode.SATELLITE -> "https://api.maptiler.com/maps/satellite/style.json?key=$maptilerKey"
-            MapLayerMode.SCHEMATIC -> ""
-        }
+        if (key.isNotBlank() && key != "your_maptiler_api_key_here") key else ""
     }
 
     // Default vehicle lat/lng
@@ -129,7 +171,7 @@ fun InteractiveMapView(
         } else if (waypoints.isNotEmpty()) {
             LatLng(waypoints[0].lat, waypoints[0].lng)
         } else {
-            LatLng(-6.2088, 106.8456) // Default Jakarta Timur
+            LatLng(-6.2088, 106.8456) // Default Jakarta Timur Base
         }
     }
 
@@ -147,9 +189,10 @@ fun InteractiveMapView(
                 geofenceAlert = geofenceAlert
             )
         } else {
-            // Live MapLibre Native Map with MapTiler Style
+            // Live MapLibre Native Map with High-Resolution Open/Carto/Satellite Tiles
             MapLibreNativeContainer(
-                styleUrl = styleUrl,
+                selectedLayer = selectedLayer,
+                maptilerKey = maptilerKey,
                 waypoints = waypoints,
                 vehicleLatLng = vehicleLatLng,
                 vehiclePlate = vehiclePlate,
@@ -355,7 +398,8 @@ fun InteractiveMapView(
 
 @Composable
 private fun MapLibreNativeContainer(
-    styleUrl: String,
+    selectedLayer: MapLayerMode,
+    maptilerKey: String,
     waypoints: List<RouteWaypoint>,
     vehicleLatLng: LatLng,
     vehiclePlate: String,
@@ -390,37 +434,73 @@ private fun MapLibreNativeContainer(
         }
     }
 
-    // Refresh markers & polyline when style or waypoints update
-    LaunchedEffect(styleUrl, waypoints, geofenceAlert) {
+    // Refresh markers & polyline when style, layer, or waypoints update
+    LaunchedEffect(selectedLayer, maptilerKey, waypoints, geofenceAlert, isTrackingActive) {
         mapView.getMapAsync { maplibreMap ->
             onMapReady(maplibreMap)
-            maplibreMap.setStyle(styleUrl) {
+
+            val styleBuilder = when (selectedLayer) {
+                MapLayerMode.STREETS -> {
+                    if (maptilerKey.isNotBlank()) {
+                        Style.Builder().fromUri("https://api.maptiler.com/maps/streets-v2/style.json?key=$maptilerKey")
+                    } else {
+                        Style.Builder().fromJson(CARTO_VOYAGER_STYLE_JSON)
+                    }
+                }
+                MapLayerMode.SATELLITE -> {
+                    if (maptilerKey.isNotBlank()) {
+                        Style.Builder().fromUri("https://api.maptiler.com/maps/satellite/style.json?key=$maptilerKey")
+                    } else {
+                        Style.Builder().fromJson(ESRI_SATELLITE_STYLE_JSON)
+                    }
+                }
+                MapLayerMode.SCHEMATIC -> Style.Builder().fromJson(CARTO_VOYAGER_STYLE_JSON)
+            }
+
+            maplibreMap.setStyle(styleBuilder) {
                 // Clear old annotations
                 maplibreMap.clear()
 
                 // Add Waypoint Markers with custom styled pins
-                waypoints.forEachIndexed { index, wp ->
-                    val isOrigin = index == 0
-                    val isDestination = index == waypoints.size - 1
-                    val customWpIcon = MapLibreMarkerHelper.createWaypointMarkerIcon(
-                        context = context,
-                        isOrigin = isOrigin,
-                        isDestination = isDestination,
-                        labelNumber = index
-                    )
-                    val markerTitle = if (isOrigin) {
-                        "🚩 Titik Awal: ${wp.label}"
-                    } else if (isDestination) {
-                        "🏁 Tujuan Akhir: ${wp.label}"
-                    } else {
-                        "📍 Titik ${index + 1}: ${wp.label}"
+                if (waypoints.isNotEmpty()) {
+                    waypoints.forEachIndexed { index, wp ->
+                        val isOrigin = index == 0
+                        val isDestination = index == waypoints.size - 1
+                        val customWpIcon = MapLibreMarkerHelper.createWaypointMarkerIcon(
+                            context = context,
+                            isOrigin = isOrigin,
+                            isDestination = isDestination,
+                            labelNumber = index
+                        )
+                        val markerTitle = if (isOrigin) {
+                            "🚩 Titik Awal: ${wp.label}"
+                        } else if (isDestination) {
+                            "🏁 Tujuan Akhir: ${wp.label}"
+                        } else {
+                            "📍 Titik ${index + 1}: ${wp.label}"
+                        }
+                        maplibreMap.addMarker(
+                            MarkerOptions()
+                                .position(LatLng(wp.lat, wp.lng))
+                                .icon(customWpIcon)
+                                .title(markerTitle)
+                                .snippet(wp.address)
+                        )
                     }
+                } else {
+                    // Default school base marker when no waypoint is assigned yet
+                    val baseIcon = MapLibreMarkerHelper.createWaypointMarkerIcon(
+                        context = context,
+                        isOrigin = true,
+                        isDestination = false,
+                        labelNumber = 0
+                    )
                     maplibreMap.addMarker(
                         MarkerOptions()
-                            .position(LatLng(wp.lat, wp.lng))
-                            .icon(customWpIcon)
-                            .title(markerTitle)
-                            .snippet(wp.address)
+                            .position(vehicleLatLng)
+                            .icon(baseIcon)
+                            .title("🏫 Pangkalan Sekolah Rakyat")
+                            .snippet("Armada Standby: $vehiclePlate")
                     )
                 }
 
@@ -454,10 +534,10 @@ private fun MapLibreNativeContainer(
                 // Initial Camera positioning
                 val cameraPosition = CameraPosition.Builder()
                     .target(vehicleLatLng)
-                    .zoom(14.2)
+                    .zoom(if (waypoints.size >= 2) 13.8 else 14.5)
                     .tilt(15.0)
                     .build()
-                maplibreMap.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition), 1200)
+                maplibreMap.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition), 1000)
             }
         }
     }

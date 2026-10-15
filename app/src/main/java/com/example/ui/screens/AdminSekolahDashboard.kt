@@ -67,6 +67,7 @@ import com.example.model.BookingStatus
 import com.example.model.CarStatus
 import com.example.model.CarVehicle
 import com.example.model.Role
+import com.example.model.RouteWaypoint
 import com.example.service.TrackingForegroundService
 import com.example.ui.components.CardIconMetric
 import com.example.ui.components.InteractiveMapView
@@ -561,14 +562,19 @@ private fun AdminLiveMapTrackingContent(
         }
 
         item {
+            val fallbackWaypoints = listOf(
+                RouteWaypoint("WP-0", "Sekolah Rakyat Cabang", "Pangkalan Armada Utama", -6.2088, 106.8456, isCompleted = true),
+                RouteWaypoint("WP-1", "RSUD Duren Sawit", "Jl. Raden Inten II No. 1", -6.2200, 106.8560),
+                RouteWaypoint("WP-2", "Dinas Pendidikan Wilayah", "Jl. Matraman Raya No. 220", -6.2300, 106.8650)
+            )
             InteractiveMapView(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(280.dp),
-                waypoints = activeOnDuty?.waypoints ?: emptyList(),
+                waypoints = if (activeOnDuty != null && activeOnDuty.waypoints.isNotEmpty()) activeOnDuty.waypoints else fallbackWaypoints,
                 vehiclePlate = activeOnDuty?.vehiclePlate ?: "B 1024 SR",
-                isTrackingActive = trackingState.isTrackingActive,
-                speedKmh = trackingState.speedKmh,
+                isTrackingActive = trackingState.isTrackingActive || activeOnDuty != null,
+                speedKmh = if (trackingState.isTrackingActive) trackingState.speedKmh else (if (activeOnDuty != null) 38f else 0f),
                 geofenceAlert = trackingState.geofenceAlert
             )
         }
