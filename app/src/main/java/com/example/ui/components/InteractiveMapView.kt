@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,40 +24,69 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Badge
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.BuildConfig
 import com.example.model.RouteWaypoint
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CrimsonRed
 import com.example.ui.theme.EmeraldGreen
 import com.example.ui.theme.NavyPrimary
+import org.maplibre.android.MapLibre
+import org.maplibre.android.annotations.MarkerOptions
+import org.maplibre.android.annotations.PolylineOptions
+import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.Style
+
+enum class MapLayerMode(val label: String) {
+    STREETS("Jalan (MapTiler)"),
+    SATELLITE("Satelit (MapTiler)"),
+    SCHEMATIC("Skematik")
+}
 
 @Composable
 fun InteractiveMapView(
@@ -68,26 +98,39 @@ fun InteractiveMapView(
     geofenceAlert: Boolean = false,
     onMapClick: () -> Unit = {}
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseAnim by infiniteTransition.animateFloat(
-        initialValue = 0.8f,
-        targetValue = 1.6f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "pulse"
-    )
+    var selectedLayer by remember { mutableStateOf(MapLayerMode.STREETS) }
+    var maplibreMapInstance by remember { mutableStateOf<MapLibreMap?>(null) }
 
-    val carProgressAnim by infiniteTransition.animateFloat(
-        initialValue = 0.05f,
-        targetValue = 0.95f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(8000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "car_movement"
-    )
+    // MapTiler API Key from BuildConfig with fallback to user's registered key
+    val maptilerKey = remember {
+        val key = try {
+            BuildConfig.MAPTILER_API_KEY
+        } catch (_: Exception) {
+            ""
+        }
+        if (key.isNotBlank() && key != "your_maptiler_api_key_here") key else "LjxVm093WVywabUyIMw1"
+    }
+
+    val styleUrl = remember(selectedLayer, maptilerKey) {
+        when (selectedLayer) {
+            MapLayerMode.STREETS -> "https://api.maptiler.com/maps/streets-v2/style.json?key=$maptilerKey"
+            MapLayerMode.SATELLITE -> "https://api.maptiler.com/maps/satellite/style.json?key=$maptilerKey"
+            MapLayerMode.SCHEMATIC -> ""
+        }
+    }
+
+    // Default vehicle lat/lng
+    val vehicleLatLng = remember(waypoints) {
+        if (waypoints.size >= 2) {
+            val p0 = waypoints[0]
+            val p1 = waypoints[1]
+            LatLng(p0.lat + (p1.lat - p0.lat) * 0.45, p0.lng + (p1.lng - p0.lng) * 0.45)
+        } else if (waypoints.isNotEmpty()) {
+            LatLng(waypoints[0].lat, waypoints[0].lng)
+        } else {
+            LatLng(-6.2088, 106.8456) // Default Jakarta Timur
+        }
+    }
 
     Box(
         modifier = modifier
@@ -96,160 +139,26 @@ fun InteractiveMapView(
             .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(20.dp))
             .testTag("interactive_map_canvas")
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val w = size.width
-            val h = size.height
-
-            // 1. Draw Map Grid / Street Blocks
-            val gridColor = Color(0xFFD6E0EC)
-            val roadColor = Color(0xFFFFFFFF)
-            val mainRoadColor = Color(0xFFF1F5F9)
-
-            // Background blocks
-            for (i in 0..5) {
-                drawLine(
-                    color = gridColor,
-                    start = Offset(0f, h * (i / 5f)),
-                    end = Offset(w, h * (i / 5f)),
-                    strokeWidth = 2f
-                )
-                drawLine(
-                    color = gridColor,
-                    start = Offset(w * (i / 5f), 0f),
-                    end = Offset(w * (i / 5f), h),
-                    strokeWidth = 2f
-                )
-            }
-
-            // Secondary Roads
-            drawLine(
-                color = roadColor,
-                start = Offset(0f, h * 0.35f),
-                end = Offset(w, h * 0.45f),
-                strokeWidth = 24f,
-                cap = StrokeCap.Round
+        if (selectedLayer == MapLayerMode.SCHEMATIC) {
+            SchematicRadarMapView(
+                waypoints = waypoints,
+                isTrackingActive = isTrackingActive,
+                geofenceAlert = geofenceAlert
             )
-            drawLine(
-                color = roadColor,
-                start = Offset(w * 0.3f, 0f),
-                end = Offset(w * 0.25f, h),
-                strokeWidth = 20f,
-                cap = StrokeCap.Round
-            )
-            drawLine(
-                color = roadColor,
-                start = Offset(w * 0.7f, 0f),
-                end = Offset(w * 0.8f, h),
-                strokeWidth = 22f,
-                cap = StrokeCap.Round
-            )
-
-            // Main Highway
-            val highwayPath = Path().apply {
-                moveTo(w * 0.05f, h * 0.85f)
-                cubicTo(
-                    w * 0.3f, h * 0.65f,
-                    w * 0.6f, h * 0.75f,
-                    w * 0.95f, h * 0.25f
-                )
-            }
-            drawPath(
-                path = highwayPath,
-                color = mainRoadColor,
-                style = Stroke(width = 36f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-            )
-
-            // 2. Waypoint coordinates mapping
-            val p0 = Offset(w * 0.15f, h * 0.78f) // Base: Sekolah Rakyat
-            val p1 = Offset(w * 0.48f, h * 0.52f) // Tujuan 1
-            val p2 = Offset(w * 0.82f, h * 0.28f) // Tujuan 2
-
-            // Route Corridor (Geofencing Safe Zone)
-            val corridorPath = Path().apply {
-                moveTo(p0.x, p0.y)
-                quadraticTo(w * 0.30f, h * 0.68f, p1.x, p1.y)
-                quadraticTo(w * 0.65f, h * 0.38f, p2.x, p2.y)
-            }
-
-            val routeColor = if (geofenceAlert) CrimsonRed else EmeraldGreen
-            val routeHaloColor = if (geofenceAlert) Color(0x33DC2626) else Color(0x33059669)
-
-            // Draw route halo / safe corridor
-            drawPath(
-                path = corridorPath,
-                color = routeHaloColor,
-                style = Stroke(width = 28f, cap = StrokeCap.Round)
-            )
-
-            // Draw active planned route line
-            drawPath(
-                path = corridorPath,
-                color = routeColor,
-                style = Stroke(
-                    width = 8f,
-                    cap = StrokeCap.Round,
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 12f), 0f)
-                )
-            )
-
-            // 3. Draw Pins
-            // Pin 0: Sekolah Rakyat (Navy)
-            drawCircle(color = NavyPrimary.copy(alpha = 0.25f), radius = 24f, center = p0)
-            drawCircle(color = NavyPrimary, radius = 12f, center = p0)
-            drawCircle(color = Color.White, radius = 5f, center = p0)
-
-            // Pin 1: Tujuan 1 (Amber)
-            drawCircle(color = AmberWarning.copy(alpha = 0.25f), radius = 24f, center = p1)
-            drawCircle(color = AmberWarning, radius = 12f, center = p1)
-            drawCircle(color = Color.White, radius = 5f, center = p1)
-
-            // Pin 2: Tujuan 2 (Emerald)
-            drawCircle(color = EmeraldGreen.copy(alpha = 0.25f), radius = 24f, center = p2)
-            drawCircle(color = EmeraldGreen, radius = 12f, center = p2)
-            drawCircle(color = Color.White, radius = 5f, center = p2)
-
-            // 4. Moving Car Marker along the path
-            if (isTrackingActive) {
-                val t = carProgressAnim
-                // Interpolate along route
-                val carPos = if (t <= 0.5f) {
-                    val subT = t * 2f
-                    Offset(
-                        p0.x + (p1.x - p0.x) * subT,
-                        p0.y + (p1.y - p0.y) * subT
-                    )
-                } else {
-                    val subT = (t - 0.5f) * 2f
-                    Offset(
-                        p1.x + (p2.x - p1.x) * subT,
-                        p1.y + (p2.y - p1.y) * subT
-                    )
+        } else {
+            // Live MapLibre Native Map with MapTiler Style
+            MapLibreNativeContainer(
+                styleUrl = styleUrl,
+                waypoints = waypoints,
+                vehicleLatLng = vehicleLatLng,
+                vehiclePlate = vehiclePlate,
+                isTrackingActive = isTrackingActive,
+                speedKmh = speedKmh,
+                geofenceAlert = geofenceAlert,
+                onMapReady = { map ->
+                    maplibreMapInstance = map
                 }
-
-                // If geofence alert is simulated, displace car off corridor
-                val finalCarPos = if (geofenceAlert) {
-                    Offset(carPos.x - 30f, carPos.y - 45f)
-                } else carPos
-
-                // Radiating pulse
-                drawCircle(
-                    color = (if (geofenceAlert) CrimsonRed else EmeraldGreen).copy(alpha = 0.35f / pulseAnim),
-                    radius = 28f * pulseAnim,
-                    center = finalCarPos
-                )
-
-                // Car base circle
-                drawCircle(
-                    color = Color.White,
-                    radius = 18f,
-                    center = finalCarPos
-                )
-                drawCircle(
-                    color = if (geofenceAlert) CrimsonRed else EmeraldGreen,
-                    radius = 14f,
-                    center = finalCarPos
-                )
-            }
+            )
         }
 
         // Top Status Header Overlay
@@ -294,29 +203,118 @@ fun InteractiveMapView(
                 }
             }
 
-            // Multi-point Destination Pill
+            // Layer Selector Pill
             Surface(
                 color = NavyPrimary,
                 shape = RoundedCornerShape(20.dp),
-                shadowElevation = 2.dp
+                shadowElevation = 2.dp,
+                modifier = Modifier.clickable {
+                    selectedLayer = when (selectedLayer) {
+                        MapLayerMode.STREETS -> MapLayerMode.SATELLITE
+                        MapLayerMode.SATELLITE -> MapLayerMode.SCHEMATIC
+                        MapLayerMode.SCHEMATIC -> MapLayerMode.STREETS
+                    }
+                }
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        Icons.Default.Navigation,
-                        contentDescription = "Rute",
+                        Icons.Default.Layers,
+                        contentDescription = "Ganti Tipe Peta",
                         tint = Color.White,
                         modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "${waypoints.size} Titik Rute",
+                        text = selectedLayer.label,
                         color = Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
                     )
+                }
+            }
+        }
+
+        // Map Control Floating Buttons (Zoom In, Zoom Out, Focus Armada)
+        if (selectedLayer != MapLayerMode.SCHEMATIC) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Focus Armada Button
+                Surface(
+                    shape = CircleShape,
+                    color = Color.White,
+                    shadowElevation = 4.dp,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clickable {
+                            maplibreMapInstance?.animateCamera(
+                                CameraUpdateFactory.newLatLngZoom(vehicleLatLng, 15.0),
+                                800
+                            )
+                        }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.MyLocation,
+                            contentDescription = "Pusatkan ke Armada",
+                            tint = NavyPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
+                // Zoom In Button
+                Surface(
+                    shape = CircleShape,
+                    color = Color.White,
+                    shadowElevation = 4.dp,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clickable {
+                            maplibreMapInstance?.animateCamera(
+                                CameraUpdateFactory.zoomIn(),
+                                400
+                            )
+                        }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = "Perbesar Peta",
+                            tint = NavyPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
+                // Zoom Out Button
+                Surface(
+                    shape = CircleShape,
+                    color = Color.White,
+                    shadowElevation = 4.dp,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clickable {
+                            maplibreMapInstance?.animateCamera(
+                                CameraUpdateFactory.zoomOut(),
+                                400
+                            )
+                        }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.Remove,
+                            contentDescription = "Perkecil Peta",
+                            tint = NavyPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }
@@ -350,6 +348,288 @@ fun InteractiveMapView(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun MapLibreNativeContainer(
+    styleUrl: String,
+    waypoints: List<RouteWaypoint>,
+    vehicleLatLng: LatLng,
+    vehiclePlate: String,
+    isTrackingActive: Boolean,
+    speedKmh: Float,
+    geofenceAlert: Boolean,
+    onMapReady: (MapLibreMap) -> Unit
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    val mapView = remember {
+        MapLibre.getInstance(context)
+        MapView(context)
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> mapView.onStart()
+                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                Lifecycle.Event.ON_STOP -> mapView.onStop()
+                Lifecycle.Event.ON_DESTROY -> mapView.onDestroy()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        mapView.onCreate(null)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Refresh markers & polyline when style or waypoints update
+    LaunchedEffect(styleUrl, waypoints, geofenceAlert) {
+        mapView.getMapAsync { maplibreMap ->
+            onMapReady(maplibreMap)
+            maplibreMap.setStyle(styleUrl) {
+                // Clear old annotations
+                maplibreMap.clear()
+
+                // Add Waypoint Markers
+                waypoints.forEachIndexed { index, wp ->
+                    val markerTitle = if (index == 0) {
+                        "🚩 Titik Awal: ${wp.label}"
+                    } else if (index == waypoints.size - 1) {
+                        "🏁 Tujuan Akhir: ${wp.label}"
+                    } else {
+                        "📍 Titik ${index + 1}: ${wp.label}"
+                    }
+                    maplibreMap.addMarker(
+                        MarkerOptions()
+                            .position(LatLng(wp.lat, wp.lng))
+                            .title(markerTitle)
+                            .snippet(wp.address)
+                    )
+                }
+
+                // Add Polyline Route
+                if (waypoints.size >= 2) {
+                    val linePoints = waypoints.map { LatLng(it.lat, it.lng) }
+                    val routeColor = if (geofenceAlert) {
+                        android.graphics.Color.parseColor("#DC2626")
+                    } else {
+                        android.graphics.Color.parseColor("#059669")
+                    }
+                    maplibreMap.addPolyline(
+                        PolylineOptions()
+                            .addAll(linePoints)
+                            .color(routeColor)
+                            .width(5f)
+                    )
+                }
+
+                // Add Vehicle Marker
+                maplibreMap.addMarker(
+                    MarkerOptions()
+                        .position(vehicleLatLng)
+                        .title("🚗 Armada: $vehiclePlate")
+                        .snippet(if (isTrackingActive) "GPS Aktif: ${speedKmh.toInt()} km/j" else "Standby")
+                )
+
+                // Initial Camera positioning
+                val cameraPosition = CameraPosition.Builder()
+                    .target(vehicleLatLng)
+                    .zoom(14.2)
+                    .tilt(15.0)
+                    .build()
+                maplibreMap.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition), 1200)
+            }
+        }
+    }
+
+    AndroidView(
+        factory = { mapView },
+        modifier = Modifier.fillMaxSize()
+    )
+}
+
+@Composable
+private fun SchematicRadarMapView(
+    waypoints: List<RouteWaypoint>,
+    isTrackingActive: Boolean,
+    geofenceAlert: Boolean
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseAnim by infiniteTransition.animateFloat(
+        initialValue = 0.8f,
+        targetValue = 1.6f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "pulse"
+    )
+
+    val carProgressAnim by infiniteTransition.animateFloat(
+        initialValue = 0.05f,
+        targetValue = 0.95f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(8000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "car_movement"
+    )
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val w = size.width
+        val h = size.height
+
+        // 1. Draw Map Grid / Street Blocks
+        val gridColor = Color(0xFFD6E0EC)
+        val roadColor = Color(0xFFFFFFFF)
+        val mainRoadColor = Color(0xFFF1F5F9)
+
+        // Background blocks
+        for (i in 0..5) {
+            drawLine(
+                color = gridColor,
+                start = Offset(0f, h * (i / 5f)),
+                end = Offset(w, h * (i / 5f)),
+                strokeWidth = 2f
+            )
+            drawLine(
+                color = gridColor,
+                start = Offset(w * (i / 5f), 0f),
+                end = Offset(w * (i / 5f), h),
+                strokeWidth = 2f
+            )
+        }
+
+        // Secondary Roads
+        drawLine(
+            color = roadColor,
+            start = Offset(0f, h * 0.35f),
+            end = Offset(w, h * 0.45f),
+            strokeWidth = 24f,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = roadColor,
+            start = Offset(w * 0.3f, 0f),
+            end = Offset(w * 0.25f, h),
+            strokeWidth = 20f,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = roadColor,
+            start = Offset(w * 0.7f, 0f),
+            end = Offset(w * 0.8f, h),
+            strokeWidth = 22f,
+            cap = StrokeCap.Round
+        )
+
+        // Main Highway
+        val highwayPath = Path().apply {
+            moveTo(w * 0.05f, h * 0.85f)
+            cubicTo(
+                w * 0.3f, h * 0.65f,
+                w * 0.6f, h * 0.75f,
+                w * 0.95f, h * 0.25f
+            )
+        }
+        drawPath(
+            path = highwayPath,
+            color = mainRoadColor,
+            style = Stroke(width = 36f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // 2. Waypoint coordinates mapping
+        val p0 = Offset(w * 0.15f, h * 0.78f) // Base: Sekolah Rakyat
+        val p1 = Offset(w * 0.48f, h * 0.52f) // Tujuan 1
+        val p2 = Offset(w * 0.82f, h * 0.28f) // Tujuan 2
+
+        // Route Corridor (Geofencing Safe Zone)
+        val corridorPath = Path().apply {
+            moveTo(p0.x, p0.y)
+            quadraticTo(w * 0.30f, h * 0.68f, p1.x, p1.y)
+            quadraticTo(w * 0.65f, h * 0.38f, p2.x, p2.y)
+        }
+
+        val routeColor = if (geofenceAlert) CrimsonRed else EmeraldGreen
+        val routeHaloColor = if (geofenceAlert) Color(0x33DC2626) else Color(0x33059669)
+
+        // Draw route halo / safe corridor
+        drawPath(
+            path = corridorPath,
+            color = routeHaloColor,
+            style = Stroke(width = 28f, cap = StrokeCap.Round)
+        )
+
+        // Draw active planned route line
+        drawPath(
+            path = corridorPath,
+            color = routeColor,
+            style = Stroke(
+                width = 8f,
+                cap = StrokeCap.Round,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 12f), 0f)
+            )
+        )
+
+        // 3. Draw Pins
+        // Pin 0: Sekolah Rakyat (Navy)
+        drawCircle(color = NavyPrimary.copy(alpha = 0.25f), radius = 24f, center = p0)
+        drawCircle(color = NavyPrimary, radius = 12f, center = p0)
+        drawCircle(color = Color.White, radius = 5f, center = p0)
+
+        // Pin 1: Tujuan 1 (Amber)
+        drawCircle(color = AmberWarning.copy(alpha = 0.25f), radius = 24f, center = p1)
+        drawCircle(color = AmberWarning, radius = 12f, center = p1)
+        drawCircle(color = Color.White, radius = 5f, center = p1)
+
+        // Pin 2: Tujuan 2 (Emerald)
+        drawCircle(color = EmeraldGreen.copy(alpha = 0.25f), radius = 24f, center = p2)
+        drawCircle(color = EmeraldGreen, radius = 12f, center = p2)
+        drawCircle(color = Color.White, radius = 5f, center = p2)
+
+        // 4. Moving Car Marker along the path
+        if (isTrackingActive) {
+            val t = carProgressAnim
+            val carPos = if (t <= 0.5f) {
+                val subT = t * 2f
+                Offset(
+                    p0.x + (p1.x - p0.x) * subT,
+                    p0.y + (p1.y - p0.y) * subT
+                )
+            } else {
+                val subT = (t - 0.5f) * 2f
+                Offset(
+                    p1.x + (p2.x - p1.x) * subT,
+                    p1.y + (p2.y - p1.y) * subT
+                )
+            }
+
+            val finalCarPos = if (geofenceAlert) {
+                Offset(carPos.x - 30f, carPos.y - 45f)
+            } else carPos
+
+            drawCircle(
+                color = (if (geofenceAlert) CrimsonRed else EmeraldGreen).copy(alpha = 0.35f / pulseAnim),
+                radius = 28f * pulseAnim,
+                center = finalCarPos
+            )
+            drawCircle(
+                color = Color.White,
+                radius = 18f,
+                center = finalCarPos
+            )
+            drawCircle(
+                color = if (geofenceAlert) CrimsonRed else EmeraldGreen,
+                radius = 14f,
+                center = finalCarPos
+            )
         }
     }
 }
