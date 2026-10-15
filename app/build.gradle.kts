@@ -76,6 +76,7 @@ secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
   ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
+  ignoreList.add("GEMINI_API_KEY")
 }
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
@@ -87,10 +88,11 @@ dependencies {
   implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
-  // implementation(libs.androidx.camera.camera2)
-  // implementation(libs.androidx.camera.core)
-  // implementation(libs.androidx.camera.lifecycle)
-  // implementation(libs.androidx.camera.view)
+  implementation(libs.androidx.camera.camera2)
+  implementation(libs.androidx.camera.core)
+  implementation(libs.androidx.camera.lifecycle)
+  implementation(libs.androidx.camera.view)
+  implementation(libs.zxing.core)
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.androidx.compose.material3)

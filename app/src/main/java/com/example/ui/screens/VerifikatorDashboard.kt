@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Lock
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.VerifiedUser
+import com.example.ui.components.CameraQrScannerView
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -117,6 +119,26 @@ fun VerifikatorDashboard(
 
     var selectedBookingForInspection by remember { mutableStateOf<BookingRequest?>(null) }
     var showInspectionSheet by remember { mutableStateOf(false) }
+    var showCameraScanner by remember { mutableStateOf(false) }
+
+    if (showCameraScanner) {
+        CameraQrScannerView(
+            onQrCodeScanned = { scannedCode ->
+                val matching = branchBookings.find { it.bookingCode.equals(scannedCode.trim(), ignoreCase = true) }
+                if (matching != null) {
+                    showCameraScanner = false
+                    selectedBookingForInspection = matching
+                    showInspectionSheet = true
+                    Toast.makeText(context, "QR Berhasil Dipindai: ${matching.bookingCode} (${matching.vehiclePlate})", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(context, "QR Terdeteksi: $scannedCode (Tidak ditemukan di cabang ini)", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onClose = { showCameraScanner = false },
+            sampleCodesForSimulation = branchBookings.map { it.bookingCode }
+        )
+        return
+    }
 
     Column(
         modifier = Modifier
@@ -191,6 +213,7 @@ fun VerifikatorDashboard(
             )
             2 -> GateSearchCodeContent(
                 branchBookings = branchBookings,
+                onOpenScanner = { showCameraScanner = true },
                 onSelectBooking = { bkg ->
                     selectedBookingForInspection = bkg
                     showInspectionSheet = true
@@ -539,6 +562,7 @@ private fun GateReturnQueueContent(
 @Composable
 private fun GateSearchCodeContent(
     branchBookings: List<BookingRequest>,
+    onOpenScanner: () -> Unit,
     onSelectBooking: (BookingRequest) -> Unit
 ) {
     var searchCode by remember { mutableStateOf("") }
@@ -553,6 +577,68 @@ private fun GateSearchCodeContent(
             .fillMaxSize()
             .padding(16.dp)
     ) {
+        // Hero Live Camera Scanner Card
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = NavyPrimary),
+            modifier = Modifier.fillMaxWidth().testTag("card_open_camera_scanner")
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(EmeraldGreen),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.QrCodeScanner,
+                        contentDescription = "Scanner",
+                        tint = Color.White,
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Pemindai QR Kamera Gerbang",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    Text(
+                        text = "Arahkan kamera ke layar HP peminjam untuk verifikasi instan",
+                        color = Color(0xFFCBD5E1),
+                        fontSize = 11.sp
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Button(
+                        onClick = onOpenScanner,
+                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.testTag("btn_trigger_camera_scanner")
+                    ) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Buka Kamera Scanner", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Atau Cari Manual Kode / Plat Nomor:",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = NavyPrimary
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+
         OutlinedTextField(
             value = searchCode,
             onValueChange = { searchCode = it },

@@ -1,5 +1,7 @@
 package com.example.ui.components
 
+import android.widget.Toast
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +25,11 @@ import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.LocalGasStation
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import com.example.util.QrCodeUtils
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Warning
@@ -507,6 +514,16 @@ private fun QrCodeTicketSheetContent(
     onClose: () -> Unit
 ) {
     if (booking == null) return
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+
+    val qrBitmap = remember(booking.bookingCode) {
+        QrCodeUtils.generateQrBitmap(
+            content = booking.bookingCode,
+            sizePx = 512,
+            darkColor = android.graphics.Color.parseColor("#1B2A4A")
+        )
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -519,46 +536,85 @@ private fun QrCodeTicketSheetContent(
             color = NavyPrimary
         )
         Text(
-            text = "Tunjukkan barcode/QR ini kepada Petugas Keamanan di pos gerbang",
+            text = "Tunjukkan QR ini kepada Petugas Keamanan di pos gerbang untuk di-scan",
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
-        // Visual QR Simulation Box
+        // Visual Real QR Code Box
         Surface(
             color = Color.White,
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(20.dp),
             border = androidx.compose.foundation.BorderStroke(2.dp, NavyPrimary),
-            shadowElevation = 6.dp,
-            modifier = Modifier.size(210.dp)
+            shadowElevation = 8.dp,
+            modifier = Modifier.padding(horizontal = 16.dp)
         ) {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                modifier = Modifier.padding(18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(
-                    Icons.Default.QrCode,
-                    contentDescription = "QR Code",
-                    modifier = Modifier.size(130.dp),
-                    tint = NavyPrimary
-                )
-                Spacer(modifier = Modifier.height(8.dp))
+                if (qrBitmap != null) {
+                    Image(
+                        bitmap = qrBitmap.asImageBitmap(),
+                        contentDescription = "QR Code Tiket: ${booking.bookingCode}",
+                        modifier = Modifier
+                            .size(190.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.QrCode,
+                        contentDescription = "QR Code",
+                        modifier = Modifier.size(170.dp),
+                        tint = NavyPrimary
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Surface(
+                    color = EmeraldGreen.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = "KODE TIKET RESMI SIPEMO",
+                        color = EmeraldGreen,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
                 Text(
                     text = booking.bookingCode,
                     fontWeight = FontWeight.ExtraBold,
-                    fontSize = 16.sp,
+                    fontSize = 17.sp,
                     letterSpacing = 1.sp,
                     color = NavyPrimary
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Copy button
+        OutlinedButton(
+            onClick = {
+                clipboardManager.setText(AnnotatedString(booking.bookingCode))
+                Toast.makeText(context, "Kode booking disalin: ${booking.bookingCode}", Toast.LENGTH_SHORT).show()
+            },
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Salin Kode Tiket", fontSize = 12.sp)
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
 
         Surface(
             color = SurfaceSubtle,

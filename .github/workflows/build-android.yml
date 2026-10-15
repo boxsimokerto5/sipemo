@@ -67,7 +67,6 @@ jobs:
       - name: Generate .env Configuration
         run: |
           echo "MAPTILER_API_KEY=${{ secrets.MAPTILER_API_KEY || 'LjxVm093WVywabUyIMw1' }}" > .env
-          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
 
       - name: Build Release APK
         env:
