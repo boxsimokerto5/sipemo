@@ -1,5 +1,10 @@
 package com.example.ui.components
 
+import android.annotation.SuppressLint
+import android.content.Context
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -25,24 +30,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,115 +62,60 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.example.BuildConfig
 import com.example.model.RouteWaypoint
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CrimsonRed
 import com.example.ui.theme.EmeraldGreen
 import com.example.ui.theme.NavyPrimary
-import com.example.util.MapLibreMarkerHelper
-import org.maplibre.android.MapLibre
-import org.maplibre.android.annotations.MarkerOptions
-import org.maplibre.android.annotations.PolylineOptions
-import org.maplibre.android.camera.CameraPosition
-import org.maplibre.android.camera.CameraUpdateFactory
-import org.maplibre.android.geometry.LatLng
-import org.maplibre.android.maps.MapLibreMap
-import org.maplibre.android.maps.MapView
-import org.maplibre.android.maps.Style
-
-private const val CARTO_VOYAGER_STYLE_JSON = """{
-  "version": 8,
-  "name": "CartoVoyager",
-  "sources": {
-    "carto-voyager": {
-      "type": "raster",
-      "tiles": [
-        "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png",
-        "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png",
-        "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png"
-      ],
-      "tileSize": 256,
-      "attribution": "CARTO / OpenStreetMap"
-    }
-  },
-  "layers": [
-    {
-      "id": "carto-voyager-layer",
-      "type": "raster",
-      "source": "carto-voyager",
-      "minzoom": 0,
-      "maxzoom": 20
-    }
-  ]
-}"""
-
-private const val ESRI_SATELLITE_STYLE_JSON = """{
-  "version": 8,
-  "name": "EsriSatellite",
-  "sources": {
-    "esri-satellite": {
-      "type": "raster",
-      "tiles": [
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-      ],
-      "tileSize": 256,
-      "attribution": "Esri World Imagery"
-    }
-  },
-  "layers": [
-    {
-      "id": "esri-satellite-layer",
-      "type": "raster",
-      "source": "esri-satellite",
-      "minzoom": 0,
-      "maxzoom": 19
-    }
-  ]
-}"""
+import com.example.util.LocationProviderManager
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.Locale
 
 enum class MapLayerMode(val label: String) {
-    STREETS("Jalan"),
-    SATELLITE("Satelit"),
+    STREETS("Jalan (OSM)"),
+    SATELLITE("Satelit (ESRI)"),
     SCHEMATIC("Radar Skematik")
 }
 
 @Composable
 fun InteractiveMapView(
     modifier: Modifier = Modifier,
-    waypoints: List<RouteWaypoint>,
+    waypoints: List<RouteWaypoint> = emptyList(),
     vehiclePlate: String = "B 1024 SR",
     isTrackingActive: Boolean = true,
     speedKmh: Float = 42f,
     geofenceAlert: Boolean = false,
     onMapClick: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     var selectedLayer by remember { mutableStateOf(MapLayerMode.STREETS) }
-    var maplibreMapInstance by remember { mutableStateOf<MapLibreMap?>(null) }
+    var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
-    // MapTiler API Key from BuildConfig with fallback
-    val maptilerKey = remember {
-        val key = try {
-            BuildConfig.MAPTILER_API_KEY
-        } catch (_: Exception) {
-            ""
-        }
-        if (key.isNotBlank() && key != "your_maptiler_api_key_here") key else ""
-    }
+    // Real device GPS coordinates from LocationProviderManager
+    val userGps by LocationProviderManager.currentCoordinate.collectAsState()
 
-    // Default vehicle lat/lng
-    val vehicleLatLng = remember(waypoints) {
+    // Calculate effective vehicle position
+    val vehicleLat = remember(waypoints, userGps) {
         if (waypoints.size >= 2) {
             val p0 = waypoints[0]
             val p1 = waypoints[1]
-            LatLng(p0.lat + (p1.lat - p0.lat) * 0.45, p0.lng + (p1.lng - p0.lng) * 0.45)
+            p0.lat + (p1.lat - p0.lat) * 0.45
         } else if (waypoints.isNotEmpty()) {
-            LatLng(waypoints[0].lat, waypoints[0].lng)
+            waypoints[0].lat
         } else {
-            LatLng(-6.2088, 106.8456) // Default Jakarta Timur Base
+            -6.2088 // Base Jakarta Timur
+        }
+    }
+    val vehicleLng = remember(waypoints, userGps) {
+        if (waypoints.size >= 2) {
+            val p0 = waypoints[0]
+            val p1 = waypoints[1]
+            p0.lng + (p1.lng - p0.lng) * 0.45
+        } else if (waypoints.isNotEmpty()) {
+            waypoints[0].lng
+        } else {
+            106.8456 // Base Jakarta Timur
         }
     }
 
@@ -189,99 +133,133 @@ fun InteractiveMapView(
                 geofenceAlert = geofenceAlert
             )
         } else {
-            // Live MapLibre Native Map with High-Resolution Open/Carto/Satellite Tiles
-            MapLibreNativeContainer(
+            // Leaflet Native WebView Container using bundled local assets
+            LeafletMapContainer(
                 selectedLayer = selectedLayer,
-                maptilerKey = maptilerKey,
+                userLat = userGps.latitude,
+                userLng = userGps.longitude,
+                userAccuracy = userGps.accuracyMeters,
                 waypoints = waypoints,
-                vehicleLatLng = vehicleLatLng,
+                vehicleLat = vehicleLat,
+                vehicleLng = vehicleLng,
                 vehiclePlate = vehiclePlate,
-                isTrackingActive = isTrackingActive,
                 speedKmh = speedKmh,
+                isTrackingActive = isTrackingActive,
                 geofenceAlert = geofenceAlert,
-                onMapReady = { map ->
-                    maplibreMapInstance = map
-                }
+                onWebViewReady = { wv -> webViewInstance = wv }
             )
         }
 
-        // Top Status Header Overlay
-        Row(
+        // Top Status Header Overlay with Real GPS Coordinates Display
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .padding(12.dp)
         ) {
-            Surface(
-                color = Color.White.copy(alpha = 0.95f),
-                shape = RoundedCornerShape(24.dp),
-                shadowElevation = 3.dp
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // Live Vehicle / Standby Pill
+                Surface(
+                    color = Color.White.copy(alpha = 0.95f),
+                    shape = RoundedCornerShape(24.dp),
+                    shadowElevation = 3.dp
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(if (geofenceAlert) CrimsonRed else EmeraldGreen)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (isTrackingActive) "GPS LIVE: $vehiclePlate" else "ARMADA STANDBY",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp,
-                        color = NavyPrimary
-                    )
-                    if (isTrackingActive) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(if (geofenceAlert) CrimsonRed else (if (isTrackingActive) EmeraldGreen else Color(0xFF0284C7)))
+                        )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "${speedKmh.toInt()} km/j",
-                            fontWeight = FontWeight.SemiBold,
+                            text = if (isTrackingActive) "GPS LIVE: $vehiclePlate" else "ARMADA STANDBY",
+                            fontWeight = FontWeight.Bold,
                             fontSize = 11.sp,
-                            color = EmeraldGreen
+                            color = NavyPrimary
+                        )
+                        if (isTrackingActive) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "${speedKmh.toInt()} km/j",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 11.sp,
+                                color = EmeraldGreen
+                            )
+                        }
+                    }
+                }
+
+                // Layer Selector Pill
+                Surface(
+                    color = NavyPrimary,
+                    shape = RoundedCornerShape(20.dp),
+                    shadowElevation = 2.dp,
+                    modifier = Modifier.clickable {
+                        selectedLayer = when (selectedLayer) {
+                            MapLayerMode.STREETS -> MapLayerMode.SATELLITE
+                            MapLayerMode.SATELLITE -> MapLayerMode.SCHEMATIC
+                            MapLayerMode.SCHEMATIC -> MapLayerMode.STREETS
+                        }
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Layers,
+                            contentDescription = "Ganti Tipe Peta",
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = selectedLayer.label,
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
             }
 
-            // Layer Selector Pill
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // User Coordinate Indicator Pill
             Surface(
-                color = NavyPrimary,
-                shape = RoundedCornerShape(20.dp),
-                shadowElevation = 2.dp,
-                modifier = Modifier.clickable {
-                    selectedLayer = when (selectedLayer) {
-                        MapLayerMode.STREETS -> MapLayerMode.SATELLITE
-                        MapLayerMode.SATELLITE -> MapLayerMode.SCHEMATIC
-                        MapLayerMode.SCHEMATIC -> MapLayerMode.STREETS
-                    }
-                }
+                color = Color.White.copy(alpha = 0.92f),
+                shape = RoundedCornerShape(12.dp),
+                shadowElevation = 2.dp
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        Icons.Default.Layers,
-                        contentDescription = "Ganti Tipe Peta",
-                        tint = Color.White,
-                        modifier = Modifier.size(14.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(if (userGps.isRealGps) EmeraldGreen else Color(0xFFF59E0B))
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
                     Text(
-                        text = selectedLayer.label,
-                        color = Color.White,
+                        text = "📍 Koordinat Anda: ${String.format(Locale.US, "%.5f, %.5f", userGps.latitude, userGps.longitude)}",
                         fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.SemiBold,
+                        color = NavyPrimary
                     )
                 }
             }
         }
 
-        // Map Control Floating Buttons (Zoom In, Zoom Out, Focus Armada)
+        // Map Control Floating Buttons (Center to User, Center to School, Zoom In/Out)
         if (selectedLayer != MapLayerMode.SCHEMATIC) {
             Column(
                 modifier = Modifier
@@ -289,27 +267,71 @@ fun InteractiveMapView(
                     .padding(end = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Focus Armada Button
+                // Focus User Location Button (Titik Koordinat Saya)
                 Surface(
                     shape = CircleShape,
                     color = Color.White,
                     shadowElevation = 4.dp,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(38.dp)
                         .clickable {
-                            maplibreMapInstance?.animateCamera(
-                                CameraUpdateFactory.newLatLngZoom(vehicleLatLng, 15.0),
-                                800
-                            )
+                            webViewInstance?.evaluateJavascript("flyToUser();", null)
                         }
+                        .testTag("btn_focus_user_gps")
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Default.MyLocation,
-                            contentDescription = "Pusatkan ke Armada",
+                            contentDescription = "Pusatkan ke Titik Koordinat Saya",
+                            tint = Color(0xFF0284C7),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
+                // Focus School Base Button
+                Surface(
+                    shape = CircleShape,
+                    color = Color.White,
+                    shadowElevation = 4.dp,
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clickable {
+                            webViewInstance?.evaluateJavascript("flyToSchool();", null)
+                        }
+                        .testTag("btn_focus_school_base")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.School,
+                            contentDescription = "Pusatkan ke Pangkalan Sekolah",
                             tint = NavyPrimary,
                             modifier = Modifier.size(20.dp)
                         )
+                    }
+                }
+
+                // Focus Vehicle Button if active
+                if (isTrackingActive) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.White,
+                        shadowElevation = 4.dp,
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clickable {
+                                webViewInstance?.evaluateJavascript("flyToVehicle();", null)
+                            }
+                            .testTag("btn_focus_vehicle")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.DirectionsCar,
+                                contentDescription = "Pusatkan ke Armada",
+                                tint = EmeraldGreen,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
 
@@ -319,12 +341,9 @@ fun InteractiveMapView(
                     color = Color.White,
                     shadowElevation = 4.dp,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(38.dp)
                         .clickable {
-                            maplibreMapInstance?.animateCamera(
-                                CameraUpdateFactory.zoomIn(),
-                                400
-                            )
+                            webViewInstance?.evaluateJavascript("zoomIn();", null)
                         }
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -343,12 +362,9 @@ fun InteractiveMapView(
                     color = Color.White,
                     shadowElevation = 4.dp,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(38.dp)
                         .clickable {
-                            maplibreMapInstance?.animateCamera(
-                                CameraUpdateFactory.zoomOut(),
-                                400
-                            )
+                            webViewInstance?.evaluateJavascript("zoomOut();", null)
                         }
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -396,156 +412,295 @@ fun InteractiveMapView(
     }
 }
 
+@SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun MapLibreNativeContainer(
+private fun LeafletMapContainer(
     selectedLayer: MapLayerMode,
-    maptilerKey: String,
+    userLat: Double,
+    userLng: Double,
+    userAccuracy: Float,
     waypoints: List<RouteWaypoint>,
-    vehicleLatLng: LatLng,
+    vehicleLat: Double,
+    vehicleLng: Double,
     vehiclePlate: String,
-    isTrackingActive: Boolean,
     speedKmh: Float,
+    isTrackingActive: Boolean,
     geofenceAlert: Boolean,
-    onMapReady: (MapLibreMap) -> Unit
+    onWebViewReady: (WebView) -> Unit
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
 
-    val mapView = remember {
-        MapLibre.getInstance(context)
-        MapView(context)
+    val initialHtml = remember {
+        getLeafletHtml()
     }
 
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_START -> mapView.onStart()
-                Lifecycle.Event.ON_RESUME -> mapView.onResume()
-                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
-                Lifecycle.Event.ON_STOP -> mapView.onStop()
-                Lifecycle.Event.ON_DESTROY -> mapView.onDestroy()
-                else -> {}
-            }
+    var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var isMapLoaded by remember { mutableStateOf(false) }
+
+    // Update markers and properties whenever inputs change
+    LaunchedEffect(isMapLoaded, selectedLayer, userLat, userLng, userAccuracy, waypoints, vehicleLat, vehicleLng, speedKmh, isTrackingActive, geofenceAlert) {
+        val wv = webViewRef ?: return@LaunchedEffect
+        if (!isMapLoaded) return@LaunchedEffect
+
+        // 1. Update user location
+        wv.evaluateJavascript(
+            "updateUserLocation($userLat, $userLng, $userAccuracy, false);",
+            null
+        )
+
+        // 2. Update map layer
+        val layerArg = if (selectedLayer == MapLayerMode.SATELLITE) "'SATELLITE'" else "'STREETS'"
+        wv.evaluateJavascript("setLayer($layerArg);", null)
+
+        // 3. Update vehicle position
+        wv.evaluateJavascript(
+            "updateVehicle($vehicleLat, $vehicleLng, '$vehiclePlate', $speedKmh, $isTrackingActive);",
+            null
+        )
+
+        // 4. Update waypoints list
+        val jsonArray = JSONArray()
+        waypoints.forEach { wp ->
+            val obj = JSONObject()
+            obj.put("id", wp.id)
+            obj.put("label", wp.label)
+            obj.put("address", wp.address)
+            obj.put("lat", wp.lat)
+            obj.put("lng", wp.lng)
+            jsonArray.put(obj)
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        mapView.onCreate(null)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
-    // Refresh markers & polyline when style, layer, or waypoints update
-    LaunchedEffect(selectedLayer, maptilerKey, waypoints, geofenceAlert, isTrackingActive) {
-        mapView.getMapAsync { maplibreMap ->
-            onMapReady(maplibreMap)
-
-            val styleBuilder = when (selectedLayer) {
-                MapLayerMode.STREETS -> {
-                    if (maptilerKey.isNotBlank()) {
-                        Style.Builder().fromUri("https://api.maptiler.com/maps/streets-v2/style.json?key=$maptilerKey")
-                    } else {
-                        Style.Builder().fromJson(CARTO_VOYAGER_STYLE_JSON)
-                    }
-                }
-                MapLayerMode.SATELLITE -> {
-                    if (maptilerKey.isNotBlank()) {
-                        Style.Builder().fromUri("https://api.maptiler.com/maps/satellite/style.json?key=$maptilerKey")
-                    } else {
-                        Style.Builder().fromJson(ESRI_SATELLITE_STYLE_JSON)
-                    }
-                }
-                MapLayerMode.SCHEMATIC -> Style.Builder().fromJson(CARTO_VOYAGER_STYLE_JSON)
-            }
-
-            maplibreMap.setStyle(styleBuilder) {
-                // Clear old annotations
-                maplibreMap.clear()
-
-                // Add Waypoint Markers with custom styled pins
-                if (waypoints.isNotEmpty()) {
-                    waypoints.forEachIndexed { index, wp ->
-                        val isOrigin = index == 0
-                        val isDestination = index == waypoints.size - 1
-                        val customWpIcon = MapLibreMarkerHelper.createWaypointMarkerIcon(
-                            context = context,
-                            isOrigin = isOrigin,
-                            isDestination = isDestination,
-                            labelNumber = index
-                        )
-                        val markerTitle = if (isOrigin) {
-                            "🚩 Titik Awal: ${wp.label}"
-                        } else if (isDestination) {
-                            "🏁 Tujuan Akhir: ${wp.label}"
-                        } else {
-                            "📍 Titik ${index + 1}: ${wp.label}"
-                        }
-                        maplibreMap.addMarker(
-                            MarkerOptions()
-                                .position(LatLng(wp.lat, wp.lng))
-                                .icon(customWpIcon)
-                                .title(markerTitle)
-                                .snippet(wp.address)
-                        )
-                    }
-                } else {
-                    // Default school base marker when no waypoint is assigned yet
-                    val baseIcon = MapLibreMarkerHelper.createWaypointMarkerIcon(
-                        context = context,
-                        isOrigin = true,
-                        isDestination = false,
-                        labelNumber = 0
-                    )
-                    maplibreMap.addMarker(
-                        MarkerOptions()
-                            .position(vehicleLatLng)
-                            .icon(baseIcon)
-                            .title("🏫 Pangkalan Sekolah Rakyat")
-                            .snippet("Armada Standby: $vehiclePlate")
-                    )
-                }
-
-                // Add Polyline Route
-                if (waypoints.size >= 2) {
-                    val linePoints = waypoints.map { LatLng(it.lat, it.lng) }
-                    val routeColor = if (geofenceAlert) {
-                        android.graphics.Color.parseColor("#DC2626")
-                    } else {
-                        android.graphics.Color.parseColor("#059669")
-                    }
-                    maplibreMap.addPolyline(
-                        PolylineOptions()
-                            .addAll(linePoints)
-                            .color(routeColor)
-                            .width(5f)
-                    )
-                }
-
-                // Add Custom Vehicle Marker representing current location of the school vehicle
-                MapLibreMarkerHelper.addVehicleMarker(
-                    maplibreMap = maplibreMap,
-                    context = context,
-                    position = vehicleLatLng,
-                    vehiclePlate = vehiclePlate,
-                    speedKmh = speedKmh,
-                    isTrackingActive = isTrackingActive,
-                    geofenceAlert = geofenceAlert
-                )
-
-                // Initial Camera positioning
-                val cameraPosition = CameraPosition.Builder()
-                    .target(vehicleLatLng)
-                    .zoom(if (waypoints.size >= 2) 13.8 else 14.5)
-                    .tilt(15.0)
-                    .build()
-                maplibreMap.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition), 1000)
-            }
-        }
+        val safeJson = jsonArray.toString().replace("'", "\\'")
+        wv.evaluateJavascript("updateWaypoints('$safeJson', $geofenceAlert);", null)
     }
 
     AndroidView(
-        factory = { mapView },
+        factory = { ctx ->
+            WebView(ctx).apply {
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.allowFileAccess = true
+                settings.allowContentAccess = true
+                settings.setSupportZoom(false)
+
+                webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        isMapLoaded = true
+                        onWebViewReady(this@apply)
+                        // Initial update with user GPS
+                        evaluateJavascript("updateUserLocation($userLat, $userLng, $userAccuracy, true);", null)
+                    }
+                }
+
+                loadDataWithBaseURL("file:///android_asset/", initialHtml, "text/html", "UTF-8", null)
+                webViewRef = this
+            }
+        },
         modifier = Modifier.fillMaxSize()
     )
+}
+
+private fun getLeafletHtml(): String {
+    return """
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <link rel="stylesheet" href="leaflet/leaflet.css" />
+  <script src="leaflet/leaflet.js"></script>
+  <style>
+    html, body { height: 100%; width: 100%; margin: 0; padding: 0; background: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    #map { height: 100%; width: 100%; }
+    .pulse-pin-container {
+      position: relative; width: 28px; height: 28px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .pulse-dot {
+      width: 14px; height: 14px; background: #0284c7;
+      border: 2.5px solid #ffffff; border-radius: 50%;
+      box-shadow: 0 0 10px rgba(2,132,199,0.85);
+      z-index: 2;
+    }
+    .pulse-ring {
+      position: absolute; width: 34px; height: 34px;
+      border-radius: 50%; background: rgba(2,132,199,0.35);
+      animation: pulseRing 2s infinite ease-out;
+      z-index: 1;
+    }
+    @keyframes pulseRing {
+      0% { transform: scale(0.4); opacity: 1; }
+      100% { transform: scale(1.6); opacity: 0; }
+    }
+    .badge-marker {
+      background: #0f172a; color: white; padding: 4px 8px; border-radius: 12px;
+      font-size: 11px; font-weight: bold;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.35); border: 1.5px solid white;
+      white-space: nowrap; text-align: center;
+    }
+    .badge-marker.vehicle { background: #059669; }
+    .badge-marker.school { background: #1e3a8a; }
+    .badge-marker.dest { background: #d97706; }
+    .leaflet-popup-content-wrapper {
+      border-radius: 12px; font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    var map = L.map('map', {
+      zoomControl: false,
+      attributionControl: false
+    }).setView([-6.2088, 106.8456], 14);
+
+    var streetTiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      subdomains: ['a', 'b', 'c']
+    }).addTo(map);
+
+    var satTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19
+    });
+
+    var userMarker = null;
+    var userCircle = null;
+    var vehicleMarker = null;
+    var schoolMarker = null;
+    var waypointMarkers = [];
+    var routePolyline = null;
+
+    // School Base Marker
+    var schoolIcon = L.divIcon({
+      className: 'custom-icon',
+      html: '<div class="badge-marker school">🏫 Pangkalan Sekolah Rakyat</div>',
+      iconSize: [170, 26],
+      iconAnchor: [85, 13]
+    });
+    schoolMarker = L.marker([-6.2088, 106.8456], { icon: schoolIcon }).addTo(map)
+      .bindPopup('<b>Sekolah Rakyat Cabang</b><br>Pangkalan Utama Armada Siaga');
+
+    function updateUserLocation(lat, lng, accuracy, autoCenter) {
+      if (!userMarker) {
+        var userIcon = L.divIcon({
+          className: 'pulse-pin-container',
+          html: '<div class="pulse-ring"></div><div class="pulse-dot"></div>',
+          iconSize: [28, 28],
+          iconAnchor: [14, 14]
+        });
+        userMarker = L.marker([lat, lng], { icon: userIcon }).addTo(map)
+          .bindPopup('<b>📍 Lokasi Anda (Titik GPS)</b><br>Lat: ' + lat.toFixed(5) + '<br>Lng: ' + lng.toFixed(5));
+        userCircle = L.circle([lat, lng], {
+          radius: accuracy || 25,
+          color: '#0284c7',
+          fillColor: '#0284c7',
+          fillOpacity: 0.15,
+          weight: 1.5
+        }).addTo(map);
+      } else {
+        userMarker.setLatLng([lat, lng]);
+        userMarker.setPopupContent('<b>📍 Lokasi Anda (Titik GPS)</b><br>Lat: ' + lat.toFixed(5) + '<br>Lng: ' + lng.toFixed(5));
+        if (userCircle) {
+          userCircle.setLatLng([lat, lng]);
+          userCircle.setRadius(accuracy || 25);
+        }
+      }
+      if (autoCenter) {
+        map.setView([lat, lng], 15);
+      }
+    }
+
+    function setLayer(mode) {
+      if (mode === 'SATELLITE') {
+        if (map.hasLayer(streetTiles)) map.removeLayer(streetTiles);
+        if (!map.hasLayer(satTiles)) satTiles.addTo(map);
+      } else {
+        if (map.hasLayer(satTiles)) map.removeLayer(satTiles);
+        if (!map.hasLayer(streetTiles)) streetTiles.addTo(map);
+      }
+    }
+
+    function updateVehicle(lat, lng, plate, speed, active) {
+      if (!active) {
+        if (vehicleMarker) { map.removeLayer(vehicleMarker); vehicleMarker = null; }
+        return;
+      }
+      var carIcon = L.divIcon({
+        className: 'custom-icon',
+        html: '<div class="badge-marker vehicle">🚗 ' + plate + ' (' + Math.round(speed) + ' km/j)</div>',
+        iconSize: [130, 26],
+        iconAnchor: [65, 13]
+      });
+      if (!vehicleMarker) {
+        vehicleMarker = L.marker([lat, lng], { icon: carIcon }).addTo(map)
+          .bindPopup('<b>Armada Aktif: ' + plate + '</b><br>Kecepatan: ' + Math.round(speed) + ' km/j');
+      } else {
+        vehicleMarker.setLatLng([lat, lng]);
+        vehicleMarker.setIcon(carIcon);
+      }
+    }
+
+    function updateWaypoints(wpListJson, alert) {
+      waypointMarkers.forEach(function(m) { map.removeLayer(m); });
+      waypointMarkers = [];
+      if (routePolyline) { map.removeLayer(routePolyline); routePolyline = null; }
+
+      var pts = [];
+      try {
+        var wps = JSON.parse(wpListJson);
+        for (var i = 0; i < wps.length; i++) {
+          var wp = wps[i];
+          pts.push([wp.lat, wp.lng]);
+          var iconHtml = '<div class="badge-marker ' + (i === 0 ? 'school' : 'dest') + '">' +
+            (i === 0 ? '🚩 ' : (i === wps.length - 1 ? '🏁 ' : '📍 ')) + wp.label + '</div>';
+          var mIcon = L.divIcon({
+            className: 'custom-icon',
+            html: iconHtml,
+            iconSize: [130, 26],
+            iconAnchor: [65, 13]
+          });
+          var m = L.marker([wp.lat, wp.lng], { icon: mIcon }).addTo(map)
+            .bindPopup('<b>' + wp.label + '</b><br>' + wp.address);
+          waypointMarkers.push(m);
+        }
+        if (pts.length >= 2) {
+          routePolyline = L.polyline(pts, {
+            color: alert ? '#dc2626' : '#059669',
+            weight: 5,
+            opacity: 0.85,
+            dashArray: '8, 8'
+          }).addTo(map);
+          map.fitBounds(routePolyline.getBounds(), { padding: [40, 40] });
+        }
+      } catch(e){}
+    }
+
+    function flyToUser() {
+      if (userMarker) {
+        map.flyTo(userMarker.getLatLng(), 16);
+      } else {
+        map.flyTo([-6.2088, 106.8456], 15);
+      }
+    }
+
+    function flyToSchool() {
+      map.flyTo([-6.2088, 106.8456], 15);
+    }
+
+    function flyToVehicle() {
+      if (vehicleMarker) {
+        map.flyTo(vehicleMarker.getLatLng(), 16);
+      } else {
+        flyToSchool();
+      }
+    }
+
+    function zoomIn() { map.zoomIn(); }
+    function zoomOut() { map.zoomOut(); }
+  </script>
+</body>
+</html>
+    """.trimIndent()
 }
 
 @Composable

@@ -122,9 +122,11 @@ fun MainAppContainer(repository: DataRepository) {
     val permissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        val locationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val locationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (locationGranted) {
-            Toast.makeText(context, "Izin lokasi aktif untuk GPS tracking", Toast.LENGTH_SHORT).show()
+            com.example.util.LocationProviderManager.initialize(context)
+            Toast.makeText(context, "Sinyal GPS aktif mendeteksi titik koordinat Anda", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -137,6 +139,7 @@ fun MainAppContainer(repository: DataRepository) {
             perms.add(Manifest.permission.POST_NOTIFICATIONS)
         }
         permissionsLauncher.launch(perms.toTypedArray())
+        com.example.util.LocationProviderManager.initialize(context)
     }
 
     BackHandler(enabled = currentScreen != AppScreen.AUTH_LANDING) {
