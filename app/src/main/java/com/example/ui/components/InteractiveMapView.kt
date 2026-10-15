@@ -72,6 +72,7 @@ import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CrimsonRed
 import com.example.ui.theme.EmeraldGreen
 import com.example.ui.theme.NavyPrimary
+import com.example.util.MapLibreMarkerHelper
 import org.maplibre.android.MapLibre
 import org.maplibre.android.annotations.MarkerOptions
 import org.maplibre.android.annotations.PolylineOptions
@@ -397,11 +398,19 @@ private fun MapLibreNativeContainer(
                 // Clear old annotations
                 maplibreMap.clear()
 
-                // Add Waypoint Markers
+                // Add Waypoint Markers with custom styled pins
                 waypoints.forEachIndexed { index, wp ->
-                    val markerTitle = if (index == 0) {
+                    val isOrigin = index == 0
+                    val isDestination = index == waypoints.size - 1
+                    val customWpIcon = MapLibreMarkerHelper.createWaypointMarkerIcon(
+                        context = context,
+                        isOrigin = isOrigin,
+                        isDestination = isDestination,
+                        labelNumber = index
+                    )
+                    val markerTitle = if (isOrigin) {
                         "🚩 Titik Awal: ${wp.label}"
-                    } else if (index == waypoints.size - 1) {
+                    } else if (isDestination) {
                         "🏁 Tujuan Akhir: ${wp.label}"
                     } else {
                         "📍 Titik ${index + 1}: ${wp.label}"
@@ -409,6 +418,7 @@ private fun MapLibreNativeContainer(
                     maplibreMap.addMarker(
                         MarkerOptions()
                             .position(LatLng(wp.lat, wp.lng))
+                            .icon(customWpIcon)
                             .title(markerTitle)
                             .snippet(wp.address)
                     )
@@ -430,12 +440,15 @@ private fun MapLibreNativeContainer(
                     )
                 }
 
-                // Add Vehicle Marker
-                maplibreMap.addMarker(
-                    MarkerOptions()
-                        .position(vehicleLatLng)
-                        .title("🚗 Armada: $vehiclePlate")
-                        .snippet(if (isTrackingActive) "GPS Aktif: ${speedKmh.toInt()} km/j" else "Standby")
+                // Add Custom Vehicle Marker representing current location of the school vehicle
+                MapLibreMarkerHelper.addVehicleMarker(
+                    maplibreMap = maplibreMap,
+                    context = context,
+                    position = vehicleLatLng,
+                    vehiclePlate = vehiclePlate,
+                    speedKmh = speedKmh,
+                    isTrackingActive = isTrackingActive,
+                    geofenceAlert = geofenceAlert
                 )
 
                 // Initial Camera positioning
