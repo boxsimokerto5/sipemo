@@ -430,8 +430,23 @@ private fun LeafletMapContainer(
 ) {
     val context = LocalContext.current
 
-    val initialHtml = remember {
-        getLeafletHtml()
+    val leafletCss = remember(context) {
+        try {
+            context.assets.open("leaflet/leaflet.css").bufferedReader().use { it.readText() }
+        } catch (e: Exception) {
+            ""
+        }
+    }
+    val leafletJs = remember(context) {
+        try {
+            context.assets.open("leaflet/leaflet.js").bufferedReader().use { it.readText() }
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    val initialHtml = remember(leafletCss, leafletJs) {
+        getLeafletHtml(cssContent = leafletCss, jsContent = leafletJs)
     }
 
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
@@ -476,23 +491,44 @@ private fun LeafletMapContainer(
     AndroidView(
         factory = { ctx ->
             WebView(ctx).apply {
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.allowFileAccess = true
-                settings.allowContentAccess = true
-                settings.setSupportZoom(false)
+                settings.apply {
+                    javaScriptEnabled = true
+                    domStorageEnabled = true
+                    allowFileAccess = true
+                    allowContentAccess = true
+                    allowFileAccessFromFileURLs = true
+                    allowUniversalAccessFromFileURLs = true
+                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    setSupportZoom(true)
+                    builtInZoomControls = false
+                    displayZoomControls = false
+                    cacheMode = WebSettings.LOAD_DEFAULT
+                    userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 SiPemoApp/1.0"
+                }
+
+                webChromeClient = object : android.webkit.WebChromeClient() {
+                    override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
+                        android.util.Log.d("SiPemoMap", "${consoleMessage?.message()} [line ${consoleMessage?.lineNumber()}]")
+                        return super.onConsoleMessage(consoleMessage)
+                    }
+                }
 
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         isMapLoaded = true
                         onWebViewReady(this@apply)
-                        // Initial update with user GPS
+                        // Center to user GPS or default location
                         evaluateJavascript("updateUserLocation($userLat, $userLng, $userAccuracy, true);", null)
+                    }
+
+                    override fun onReceivedError(view: WebView?, request: android.webkit.WebResourceRequest?, error: android.webkit.WebResourceError?) {
+                        super.onReceivedError(view, request, error)
+                        android.util.Log.w("SiPemoMap", "WebView load error: ${error?.description}")
                     }
                 }
 
-                loadDataWithBaseURL("file:///android_asset/", initialHtml, "text/html", "UTF-8", null)
+                loadDataWithBaseURL("https://sipemo.app/", initialHtml, "text/html", "UTF-8", null)
                 webViewRef = this
             }
         },
@@ -500,67 +536,129 @@ private fun LeafletMapContainer(
     )
 }
 
-private fun getLeafletHtml(): String {
+private fun getLeafletHtml(cssContent: String, jsContent: String): String {
     return """
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <link rel="stylesheet" href="leaflet/leaflet.css" />
-  <script src="leaflet/leaflet.js"></script>
   <style>
-    html, body { height: 100%; width: 100%; margin: 0; padding: 0; background: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    #map { height: 100%; width: 100%; }
+    $cssContent
+  </style>
+  <style>
+    html, body {
+      height: 100%;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      background: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow: hidden;
+    }
+    #map {
+      height: 100%;
+      width: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+    }
     .pulse-pin-container {
-      position: relative; width: 28px; height: 28px;
-      display: flex; align-items: center; justify-content: center;
+      position: relative;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
     .pulse-dot {
-      width: 14px; height: 14px; background: #0284c7;
-      border: 2.5px solid #ffffff; border-radius: 50%;
-      box-shadow: 0 0 10px rgba(2,132,199,0.85);
+      width: 14px;
+      height: 14px;
+      background: #0284c7;
+      border: 2.5px solid #ffffff;
+      border-radius: 50%;
+      box-shadow: 0 0 10px rgba(2,132,199,0.9);
       z-index: 2;
     }
     .pulse-ring {
-      position: absolute; width: 34px; height: 34px;
-      border-radius: 50%; background: rgba(2,132,199,0.35);
+      position: absolute;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: rgba(2,132,199,0.35);
       animation: pulseRing 2s infinite ease-out;
       z-index: 1;
     }
     @keyframes pulseRing {
-      0% { transform: scale(0.4); opacity: 1; }
-      100% { transform: scale(1.6); opacity: 0; }
+      0% { transform: scale(0.3); opacity: 1; }
+      100% { transform: scale(1.7); opacity: 0; }
     }
     .badge-marker {
-      background: #0f172a; color: white; padding: 4px 8px; border-radius: 12px;
-      font-size: 11px; font-weight: bold;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.35); border: 1.5px solid white;
-      white-space: nowrap; text-align: center;
+      background: #0f172a;
+      color: white;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: bold;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+      border: 1.5px solid white;
+      white-space: nowrap;
+      text-align: center;
     }
     .badge-marker.vehicle { background: #059669; }
     .badge-marker.school { background: #1e3a8a; }
     .badge-marker.dest { background: #d97706; }
+    .badge-marker.user { background: #0284c7; }
     .leaflet-popup-content-wrapper {
-      border-radius: 12px; font-size: 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      padding: 4px;
     }
   </style>
+  <script>
+    $jsContent
+  </script>
 </head>
 <body>
   <div id="map"></div>
   <script>
-    var map = L.map('map', {
-      zoomControl: false,
-      attributionControl: false
-    }).setView([-6.2088, 106.8456], 14);
+    if (typeof L === 'undefined') {
+      document.write('<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>');
+      document.write('<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\\/script>');
+    }
+  </script>
+  <script>
+    var map;
+    try {
+      map = L.map('map', {
+        zoomControl: false,
+        attributionControl: false
+      }).setView([-6.2088, 106.8456], 14);
+    } catch(e) {
+      console.error("Map init error:", e);
+    }
 
-    var streetTiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    // Street Tiles: Carto Voyager
+    var streetTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
       maxZoom: 19,
-      subdomains: ['a', 'b', 'c']
-    }).addTo(map);
+      subdomains: 'abcd',
+      crossOrigin: true
+    });
+    if (map) streetTiles.addTo(map);
 
+    // OpenStreetMap tile fallback
+    var osmTiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      subdomains: ['a', 'b', 'c'],
+      crossOrigin: true
+    });
+
+    // Satellite Imagery: ESRI World Imagery
     var satTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 19
+      maxZoom: 19,
+      crossOrigin: true
     });
 
     var userMarker = null;
@@ -571,25 +669,28 @@ private fun getLeafletHtml(): String {
     var routePolyline = null;
 
     // School Base Marker
-    var schoolIcon = L.divIcon({
-      className: 'custom-icon',
-      html: '<div class="badge-marker school">🏫 Pangkalan Sekolah Rakyat</div>',
-      iconSize: [170, 26],
-      iconAnchor: [85, 13]
-    });
-    schoolMarker = L.marker([-6.2088, 106.8456], { icon: schoolIcon }).addTo(map)
-      .bindPopup('<b>Sekolah Rakyat Cabang</b><br>Pangkalan Utama Armada Siaga');
+    if (map) {
+      var schoolIcon = L.divIcon({
+        className: 'custom-icon',
+        html: '<div class="badge-marker school">🏫 Pangkalan Sekolah Rakyat</div>',
+        iconSize: [170, 26],
+        iconAnchor: [85, 13]
+      });
+      schoolMarker = L.marker([-6.2088, 106.8456], { icon: schoolIcon }).addTo(map)
+        .bindPopup('<b>Sekolah Rakyat Cabang</b><br>Pangkalan Utama Armada Siaga');
+    }
 
     function updateUserLocation(lat, lng, accuracy, autoCenter) {
+      if (!map) return;
       if (!userMarker) {
         var userIcon = L.divIcon({
           className: 'pulse-pin-container',
           html: '<div class="pulse-ring"></div><div class="pulse-dot"></div>',
-          iconSize: [28, 28],
-          iconAnchor: [14, 14]
+          iconSize: [32, 32],
+          iconAnchor: [16, 16]
         });
         userMarker = L.marker([lat, lng], { icon: userIcon }).addTo(map)
-          .bindPopup('<b>📍 Lokasi Anda (Titik GPS)</b><br>Lat: ' + lat.toFixed(5) + '<br>Lng: ' + lng.toFixed(5));
+          .bindPopup('<b>📍 Lokasi Anda (Titik GPS)</b><br>Lat: ' + lat.toFixed(5) + '<br>Lng: ' + lng.toFixed(5) + '<br>Akurasi: ' + Math.round(accuracy) + ' m');
         userCircle = L.circle([lat, lng], {
           radius: accuracy || 25,
           color: '#0284c7',
@@ -599,7 +700,7 @@ private fun getLeafletHtml(): String {
         }).addTo(map);
       } else {
         userMarker.setLatLng([lat, lng]);
-        userMarker.setPopupContent('<b>📍 Lokasi Anda (Titik GPS)</b><br>Lat: ' + lat.toFixed(5) + '<br>Lng: ' + lng.toFixed(5));
+        userMarker.setPopupContent('<b>📍 Lokasi Anda (Titik GPS)</b><br>Lat: ' + lat.toFixed(5) + '<br>Lng: ' + lng.toFixed(5) + '<br>Akurasi: ' + Math.round(accuracy) + ' m');
         if (userCircle) {
           userCircle.setLatLng([lat, lng]);
           userCircle.setRadius(accuracy || 25);
@@ -611,8 +712,10 @@ private fun getLeafletHtml(): String {
     }
 
     function setLayer(mode) {
+      if (!map) return;
       if (mode === 'SATELLITE') {
         if (map.hasLayer(streetTiles)) map.removeLayer(streetTiles);
+        if (map.hasLayer(osmTiles)) map.removeLayer(osmTiles);
         if (!map.hasLayer(satTiles)) satTiles.addTo(map);
       } else {
         if (map.hasLayer(satTiles)) map.removeLayer(satTiles);
@@ -621,6 +724,7 @@ private fun getLeafletHtml(): String {
     }
 
     function updateVehicle(lat, lng, plate, speed, active) {
+      if (!map) return;
       if (!active) {
         if (vehicleMarker) { map.removeLayer(vehicleMarker); vehicleMarker = null; }
         return;
@@ -628,8 +732,8 @@ private fun getLeafletHtml(): String {
       var carIcon = L.divIcon({
         className: 'custom-icon',
         html: '<div class="badge-marker vehicle">🚗 ' + plate + ' (' + Math.round(speed) + ' km/j)</div>',
-        iconSize: [130, 26],
-        iconAnchor: [65, 13]
+        iconSize: [140, 26],
+        iconAnchor: [70, 13]
       });
       if (!vehicleMarker) {
         vehicleMarker = L.marker([lat, lng], { icon: carIcon }).addTo(map)
@@ -641,6 +745,7 @@ private fun getLeafletHtml(): String {
     }
 
     function updateWaypoints(wpListJson, alert) {
+      if (!map) return;
       waypointMarkers.forEach(function(m) { map.removeLayer(m); });
       waypointMarkers = [];
       if (routePolyline) { map.removeLayer(routePolyline); routePolyline = null; }
@@ -656,8 +761,8 @@ private fun getLeafletHtml(): String {
           var mIcon = L.divIcon({
             className: 'custom-icon',
             html: iconHtml,
-            iconSize: [130, 26],
-            iconAnchor: [65, 13]
+            iconSize: [140, 26],
+            iconAnchor: [70, 13]
           });
           var m = L.marker([wp.lat, wp.lng], { icon: mIcon }).addTo(map)
             .bindPopup('<b>' + wp.label + '</b><br>' + wp.address);
@@ -676,6 +781,7 @@ private fun getLeafletHtml(): String {
     }
 
     function flyToUser() {
+      if (!map) return;
       if (userMarker) {
         map.flyTo(userMarker.getLatLng(), 16);
       } else {
@@ -684,10 +790,12 @@ private fun getLeafletHtml(): String {
     }
 
     function flyToSchool() {
+      if (!map) return;
       map.flyTo([-6.2088, 106.8456], 15);
     }
 
     function flyToVehicle() {
+      if (!map) return;
       if (vehicleMarker) {
         map.flyTo(vehicleMarker.getLatLng(), 16);
       } else {
@@ -695,8 +803,8 @@ private fun getLeafletHtml(): String {
       }
     }
 
-    function zoomIn() { map.zoomIn(); }
-    function zoomOut() { map.zoomOut(); }
+    function zoomIn() { if (map) map.zoomIn(); }
+    function zoomOut() { if (map) map.zoomOut(); }
   </script>
 </body>
 </html>

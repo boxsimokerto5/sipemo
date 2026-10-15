@@ -64,7 +64,9 @@ import com.example.data.DataRepository
 import com.example.model.AppUser
 import com.example.model.BookingStatus
 import com.example.model.SchoolBranch
+import com.example.model.RouteWaypoint
 import com.example.ui.components.CardIconMetric
+import com.example.ui.components.InteractiveMapView
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.BorderLight
 import com.example.ui.theme.CrimsonRed
@@ -218,6 +220,7 @@ private fun NationalOverviewContent(
     pendingSchoolsCount: Int
 ) {
     val activeOnDuty = bookings.count { it.status == BookingStatus.ON_DUTY }
+    val onDutyBookings = bookings.filter { it.status == BookingStatus.ON_DUTY }
 
     LazyColumn(
         modifier = Modifier
@@ -247,7 +250,7 @@ private fun NationalOverviewContent(
                 CardIconMetric(
                     title = "Sedang Beroperasi",
                     value = "$activeOnDuty Unit",
-                    subtitle = "Live Tracking Aktif",
+                    subtitle = "Live Tracking",
                     icon = Icons.Default.Assessment,
                     iconBgColor = EmeraldGreen,
                     modifier = Modifier.weight(1f)
@@ -267,7 +270,7 @@ private fun NationalOverviewContent(
                 )
                 CardIconMetric(
                     title = "Antrean SK Baru",
-                    value = "$pendingSchoolsCount Unit",
+                    value = "$pendingSchoolsCount Cabang",
                     subtitle = "Perlu Verifikasi",
                     icon = Icons.Default.Description,
                     iconBgColor = AmberWarning,
@@ -276,8 +279,38 @@ private fun NationalOverviewContent(
             }
         }
 
+        // Live Interactive Map for Superadmin overview
         item {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Pemantauan GPS Live Seluruh Cabang:",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = NavyPrimary
+            )
             Spacer(modifier = Modifier.height(6.dp))
+            InteractiveMapView(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(260.dp),
+                waypoints = if (onDutyBookings.isNotEmpty() && onDutyBookings.first().waypoints.isNotEmpty()) {
+                    onDutyBookings.first().waypoints
+                } else {
+                    listOf(
+                        RouteWaypoint("WP-CB1", "Sekolah Rakyat Jakarta Timur", "Pangkalan Armada Utama", -6.2088, 106.8456, isCompleted = true),
+                        RouteWaypoint("WP-CB2", "Sekolah Rakyat Bandung", "Jl. Diponegoro No. 22", -6.9000, 107.6186),
+                        RouteWaypoint("WP-CB3", "Sekolah Rakyat Surabaya", "Jl. Pemuda No. 45", -7.2600, 112.7400)
+                    )
+                },
+                vehiclePlate = onDutyBookings.firstOrNull()?.vehiclePlate ?: vehicles.firstOrNull()?.plateNumber ?: "B 1024 SR",
+                isTrackingActive = activeOnDuty > 0,
+                speedKmh = if (activeOnDuty > 0) 42f else 0f,
+                geofenceAlert = false
+            )
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "Status Operasional Armada Cabang Saat Ini:",
                 fontSize = 13.sp,
@@ -286,42 +319,82 @@ private fun NationalOverviewContent(
             )
         }
 
-        items(bookings.filter { it.status == BookingStatus.ON_DUTY }) { bkg ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = SurfacePureWhite),
-                border = androidx.compose.foundation.BorderStroke(1.dp, BorderLight)
-            ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
+        if (onDutyBookings.isEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = SurfacePureWhite),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderLight)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(EmeraldGreen)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "${bkg.vehiclePlate} • ${bkg.vehicleModel}",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = NavyPrimary
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            color = Color(0xFF64748B).copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Semua Armada Sedang Siaga di Pangkalan",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = NavyPrimary
+                            )
+                            Text(
+                                text = "Tidak ada kendaraan dinas yang sedang beroperasi di luar saat ini.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            items(onDutyBookings) { bkg ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = SurfacePureWhite),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderLight)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(EmeraldGreen)
                         )
-                        Text(
-                            text = "${bkg.schoolBranchName} | Peminjam: ${bkg.requesterName}",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "Tujuan: ${bkg.purpose}",
-                            fontSize = 11.sp,
-                            color = EmeraldGreen,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "${bkg.vehiclePlate} • ${bkg.vehicleModel}",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = NavyPrimary
+                            )
+                            Text(
+                                text = "${bkg.schoolBranchName} | Peminjam: ${bkg.requesterName}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "Tujuan: ${bkg.purpose}",
+                                fontSize = 11.sp,
+                                color = EmeraldGreen,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
             }
@@ -420,7 +493,7 @@ private fun PendingSchoolQueueContent(
                     ) {
                         Column(modifier = Modifier.padding(10.dp)) {
                             Text(
-                                text = "Calon Admin Cabang: ${sch.adminName} (NIP: ${sch.adminNip})",
+                                text = "Calon Admin: ${sch.adminName} (NIP: ${sch.adminNip})",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = NavyPrimary
@@ -446,24 +519,29 @@ private fun PendingSchoolQueueContent(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         OutlinedButton(
                             onClick = { onReject(sch) },
                             modifier = Modifier.weight(1f),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 8.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = CrimsonRed)
                         ) {
-                            Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(15.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Tolak")
+                            Text("Tolak", fontSize = 12.sp, maxLines = 1)
                         }
                         Button(
                             onClick = { onApprove(sch) },
-                            modifier = Modifier.weight(1.5f).testTag("btn_approve_school_${sch.id}"),
+                            modifier = Modifier.weight(1.3f).testTag("btn_approve_school_${sch.id}"),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 8.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
                         ) {
-                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(15.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Setujui Cabang", fontWeight = FontWeight.Bold)
+                            Text("Setujui", fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1)
                         }
                     }
                 }
@@ -493,37 +571,34 @@ private fun ApprovedBranchesListContent(
                 border = androidx.compose.foundation.BorderStroke(1.dp, BorderLight)
             ) {
                 Row(
-                    modifier = Modifier.padding(14.dp),
+                    modifier = Modifier.padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(38.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(NavyPrimary.copy(alpha = 0.1f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.School, contentDescription = null, tint = NavyPrimary)
+                        Icon(Icons.Default.School, contentDescription = null, tint = NavyPrimary, modifier = Modifier.size(20.dp))
                     }
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = branch.name,
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp,
                             color = NavyPrimary,
-                            lineHeight = 18.sp
+                            lineHeight = 17.sp,
+                            maxLines = 2
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Admin: ${branch.adminName}",
+                            text = "Admin: ${branch.adminName} • Armada: ${branchFleet.size} Unit",
                             fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "Armada: ${branchFleet.size} Unit",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
@@ -533,7 +608,7 @@ private fun ApprovedBranchesListContent(
                             color = if (branch.isActive) EmeraldGreen else CrimsonRed
                         )
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Switch(
                         checked = branch.isActive,
                         onCheckedChange = { onToggleStatus(branch) },
