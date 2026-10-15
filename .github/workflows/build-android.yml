@@ -41,10 +41,14 @@ jobs:
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
             echo "Menggunakan Keystore dari GitHub Secrets (KEYSTORE_BASE64)..."
             echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > my-upload-key.jks
-          # 2. Jika file my-upload-key.jks sudah ada di repository:
+          # 2. Decode dari my-upload-key.base64 (kebal dari korupsi format binary git):
+          elif [ -f "my-upload-key.base64" ]; then
+            echo "Mendecode my-upload-key.base64 ke my-upload-key.jks..."
+            base64 -d my-upload-key.base64 > my-upload-key.jks
+          # 3. Jika file my-upload-key.jks sudah ada di repository:
           elif [ -f "my-upload-key.jks" ]; then
             echo "Menggunakan Keystore yang ada di repository (my-upload-key.jks)..."
-          # 3. Jika belum ada, buat keystore permanen (hanya sekali) dan jangan pernah ubah:
+          # 4. Jika belum ada, buat keystore permanen baru:
           else
             echo "Membuat Keystore Permanen baru (30 tahun masa berlaku)..."
             keytool -genkeypair -v \
